@@ -30,3 +30,6 @@ jobs:
 
       - name: Go vet
         run: go vet ./...
+
+      - name: Go test
+        run: go test -v ./...
