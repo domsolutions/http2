@@ -90,80 +90,31 @@ func (px *Proxy) handleConn(c net.Conn) {
 }
 
 func readFramesFrom(c, c2 net.Conn, primaryIsProxy bool) {
-	fr := fasthttp2.AcquireFrame()
-	defer fasthttp2.ReleaseFrame(fr)
-
-	symbol := byte('>')
-	if !primaryIsProxy {
-		symbol = '<'
-	}
-
-	fr.SetMaxLen(0)
-
-	var err error
-	for err == nil {
-		_, err = fr.ReadFrom(c) // TODO: Use ReadFromLimitPayload?
-		if err != nil {
-			if err == io.EOF {
-				err = nil
-			}
-			break
-		}
-
-		debugFrame(c, fr, symbol)
-
-		_, err = fr.WriteTo(c2)
-	}
-}
-
-func debugFrame(c net.Conn, fr *fasthttp2.FrameHeader, symbol byte) {
-	bf := bytes.NewBuffer(nil)
-
-	fmt.Fprintf(bf, "%c %d - %s\n", symbol, fr.Stream(), c.RemoteAddr())
-	fmt.Fprintf(bf, "%c %d\n", symbol, fr.Len())
-	fmt.Fprintf(bf, "%c EndStream: %v\n", symbol, fr.HasFlag(fasthttp2.FlagEndStream))
-
-	switch fr.Type() {
-	case fasthttp2.FrameHeaders:
-		fmt.Fprintf(bf, "%c [HEADERS]\n", symbol)
-		h := fasthttp2.AcquireHeaders()
-		h.ReadFrame(fr)
-		debugHeaders(bf, h, symbol)
-		fasthttp2.ReleaseHeaders(h)
-	case fasthttp2.FrameContinuation:
-		println("continuation")
-	case fasthttp2.FrameData:
-		fmt.Fprintf(bf, "%c [DATA]\n", symbol)
-		data := fasthttp2.AcquireData()
-		data.ReadFrame(fr)
-		debugData(bf, data, symbol)
-		fasthttp2.ReleaseData(data)
-	case fasthttp2.FramePriority:
-		println("priority")
-		// TODO: If a PRIORITY frame is received with a stream identifier of 0x0, the recipient MUST respond with a connection error
-	case fasthttp2.FrameResetStream:
-		println("reset")
-	case fasthttp2.FrameSettings:
-		fmt.Fprintf(bf, "%c [SETTINGS]\n", symbol)
-		st := fasthttp2.AcquireSettings()
-		st.ReadFrame(fr)
-		debugSettings(bf, st, symbol)
-		fasthttp2.ReleaseSettings(st)
-	case fasthttp2.FramePushPromise:
-		println("pp")
-	case fasthttp2.FramePing:
-		println("ping")
-	case fasthttp2.FrameGoAway:
-		println("away")
-	case fasthttp2.FrameWindowUpdate:
-		fmt.Fprintf(bf, "%c [WINDOW_UPDATE]\n", symbol)
-		wu := fasthttp2.AcquireWindowUpdate()
-		wu.ReadFrame(fr)
-		fmt.Fprintf(bf, "%c   Increment: %d\n", symbol, wu.Increment())
-		fasthttp2.ReleaseWindowUpdate(wu)
-	}
-
-	fmt.Println(bf.String())
+	// TODO reinstate when know what frame needs to be acquired
+	//fr := fasthttp2.AcquireFrame()
+	//defer fasthttp2.ReleaseFrame(fr)
+	//
+	//symbol := byte('>')
+	//if !primaryIsProxy {
+	//	symbol = '<'
+	//}
+	//
+	//fr.SetMaxLen(0)
+	//
+	//var err error
+	//for err == nil {
+	//	_, err = fr.ReadFrom(c) // TODO: Use ReadFromLimitPayload?
+	//	if err != nil {
+	//		if err == io.EOF {
+	//			err = nil
+	//		}
+	//		break
+	//	}
+	//
+	//	debugFrame(c, fr, symbol)
+	//
+	//	_, err = fr.WriteTo(c2)
+	//}
 }
 
 func debugSettings(bf *bytes.Buffer, st *fasthttp2.Settings, symbol byte) {
@@ -285,7 +236,7 @@ func startFastBackend() {
 	}
 	s.AppendCertEmbed(certData, priv)
 
-	fasthttp2.ConfigureServer(s)
+	fasthttp2.ConfigureServer(s, fasthttp2.ServerConfig{})
 
 	_, port, _ := net.SplitHostPort(*hostArg)
 
