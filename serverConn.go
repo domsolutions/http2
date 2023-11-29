@@ -376,7 +376,7 @@ loop:
 				}
 
 				if _, ok := closedStrms[fr.Stream()]; ok {
-					if fr.Type() != FramePriority {
+					if fr.Type() != FramePriority && fr.Type() != FrameWindowUpdate {
 						sc.writeGoAway(fr.Stream(), StreamClosedError, "frame on closed stream")
 					}
 

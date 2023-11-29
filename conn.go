@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"os"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -112,6 +113,9 @@ type Conn struct {
 	onDisconnect func(*Conn)
 
 	closed uint64
+
+	readLock  *sync.Mutex
+	writeLock *sync.Mutex
 }
 
 // NewConn returns a new HTTP/2 connection.
@@ -126,11 +130,13 @@ func NewConn(c net.Conn, opts ConnOpts) *Conn {
 		nextID:        1,
 		maxWindow:     1 << 20,
 		currentWindow: 1 << 20,
-		in:            make(chan *Ctx, 128),
-		out:           make(chan *FrameHeader, 128),
+		in:            make(chan *Ctx, 128),         // TODO: increase?
+		out:           make(chan *FrameHeader, 128), // TODO: increase?
 		pingInterval:  opts.PingInterval,
 		disableAcks:   opts.DisablePingChecking,
 		onDisconnect:  opts.OnDisconnect,
+		readLock:      &sync.Mutex{},
+		writeLock:     &sync.Mutex{},
 	}
 
 	nc.current.SetMaxWindowSize(1 << 20)
@@ -235,12 +241,16 @@ func (c *Conn) LastErr() error {
 // with the server. If an error is returned you can assume the TCP connection has been closed.
 func (c *Conn) Handshake() error {
 	err := c.doHandshake()
-	if err == nil {
+	if err != nil {
+		return err
+	}
+
+	for i := 0; i < runtime.NumCPU(); i++ {
 		go c.writeLoop()
 		go c.readLoop()
 	}
 
-	return err
+	return nil
 }
 
 func (c *Conn) doHandshake() error {
@@ -253,7 +263,7 @@ func (c *Conn) doHandshake() error {
 
 	var fr *FrameHeader
 
-	if fr, err = ReadFrameFrom(c.br); err == nil && fr.Type() != FrameSettings {
+	if fr, err = c.readFrameFrom(c.br); err == nil && fr.Type() != FrameSettings {
 		_ = c.c.Close()
 		return fmt.Errorf("unexpected frame, expected settings, got %s", fr.Type())
 	} else if err == nil {
@@ -471,6 +481,9 @@ loop:
 }
 
 func (c *Conn) writeFrame(fr *FrameHeader) error {
+	c.writeLock.Lock()
+	defer c.writeLock.Unlock()
+
 	_, err := fr.WriteTo(c.bw)
 	if err == nil {
 		if err = c.bw.Flush(); err != nil {
@@ -533,6 +546,8 @@ func (c *Conn) writeRequest(ctx *Ctx) error {
 	if !c.CanOpenStream() {
 		return ErrNotAvailableStreams
 	}
+	c.writeLock.Lock()
+	defer c.writeLock.Unlock()
 
 	req := ctx.Request
 
@@ -632,10 +647,30 @@ func writeData(bw *bufio.Writer, fh *FrameHeader, body []byte) (err error) {
 	return err
 }
 
+func (c *Conn) readFrameFrom(br *bufio.Reader) (*FrameHeader, error) {
+	fr := AcquireFrameHeader()
+
+	c.readLock.Lock()
+	_, err := fr.ReadFrom(br)
+	c.readLock.Unlock()
+
+	if err != nil {
+		if fr.Body() != nil {
+			ReleaseFrameHeader(fr)
+		} else {
+			frameHeaderPool.Put(fr)
+		}
+
+		fr = nil
+	}
+
+	return fr, err
+}
+
 func (c *Conn) readNext() (fr *FrameHeader, err error) {
 loop:
 	for err == nil {
-		fr, err = ReadFrameFrom(c.br)
+		fr, err = c.readFrameFrom(c.br)
 		if err != nil {
 			break
 		}
@@ -691,6 +726,9 @@ func (c *Conn) writePing() error {
 	ping.SetCurrentTime()
 
 	fr.SetBody(ping)
+
+	c.writeLock.Lock()
+	defer c.writeLock.Unlock()
 
 	_, err := fr.WriteTo(c.bw)
 	if err == nil {
