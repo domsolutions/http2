@@ -132,23 +132,6 @@ func (f *FrameHeader) parseHeader(header []byte) {
 	http2utils.Uint32ToBytes(header[5:], f.stream)         // 4
 }
 
-func ReadFrameFrom(br *bufio.Reader) (*FrameHeader, error) {
-	fr := AcquireFrameHeader()
-
-	_, err := fr.ReadFrom(br)
-	if err != nil {
-		if fr.Body() != nil {
-			ReleaseFrameHeader(fr)
-		} else {
-			frameHeaderPool.Put(fr)
-		}
-
-		fr = nil
-	}
-
-	return fr, err
-}
-
 func ReadFrameFromWithSize(br *bufio.Reader, max uint32) (*FrameHeader, error) {
 	fr := AcquireFrameHeader()
 	fr.maxLen = max

@@ -172,7 +172,8 @@ func (cl *Client) RoundTrip(hc *fasthttp.HostClient, req *fasthttp.Request, res 
 		cancelTimer.Stop()
 	}
 
-	close(ch)
+	// TODO: causes panic at goroutine sending on closed channel, need to investigate.. timeout?
+	//close(ch)
 
 	return false, err
 }
